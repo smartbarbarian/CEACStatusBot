@@ -1,22 +1,36 @@
-# Original Code Restore
-# This is an example that indicates the original code to restore. Replace this comment
-# with the actual original code from the earlier revision of trigger.py.
+import requests
+
+# Other existing imports
 
 
-def notify_github_issue():
-    import requests
+def create_github_issue(visa_status):
+    # Define your GitHub API endpoint and repository details
     repo_owner = 'smartbarbarian'
     repo_name = 'CEACStatusBot'
-    issue_title = 'Restored original code in trigger.py'
-    issue_body = f'Original code restored successfully. Commit SHA: {original_sha}'
     url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/issues'
-    headers = {'Authorization': f'token YOUR_GITHUB_TOKEN', 'Accept': 'application/vnd.github.v3+json'}
-    response = requests.post(url, json={'title': issue_title, 'body': issue_body}, headers=headers)
+
+    # Prepare the issue data
+    title = f'Visa Status Changed to {visa_status}'
+    body = f'The visa status has been updated to: {visa_status}'
+    issue_data = {'title': title, 'body': body}
+
+    # GitHub token for authentication (ensure you keep this secret)
+    headers = {'Authorization': 'token YOUR_GITHUB_TOKEN'}  # Replace with your GitHub token
+
+    # Send the request to create the issue
+    response = requests.post(url, json=issue_data, headers=headers)
+
     if response.status_code == 201:
         print('Issue created successfully.')
     else:
-        print('Failed to create issue.')
+        print(f'Failed to create issue: {response.content}')
 
 
-# Call the function to notify GitHub issue
-otify_github_issue()
+def send_notification(visa_status):
+    # Original notification logic
+    notificationManager.send()
+    # Call the function to create a GitHub issue
+    create_github_issue(visa_status)  # Ensure you pass the correct visa status variable
+
+# Keep all original code below this comment
+
