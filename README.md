@@ -23,7 +23,7 @@ You can deploy it to your own machine, but it is highly recommended to use Githu
 - ACTIVE_HOURS: optional, set the active hours to avoid disturbing during sleep. :-) Use 24 hour format. Some example: 08:00-12:00
 
 
-- GH_TOKEN: to access previous status, you need to set a Github token with `repo` scope. You can create a new token in Github -> Settings -> Developer settings -> Personal access tokens.
+- GH_TOKEN: to access previous status and create GitHub issues as notifications, set a GitHub token with `repo` scope. You can create one in Github -> Settings -> Developer settings -> Personal access tokens.
 
 #### Notification by Email
 

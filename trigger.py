@@ -1,55 +1,168 @@
+import json
 import os
-import requests
-from datetime import datetime
+import subprocess
+from datetime import UTC, datetime
 
-GITHUB_TOKEN = os.environ['GITHUB_TOKEN']
-REPO_OWNER = 'smartbarbarian'
-REPO_NAME = 'CEACStatusBot'
+from dotenv import load_dotenv
 
-EMAIL_API_URL = 'https://api.emailservice.com/send'
-TELEGRAM_API_URL = 'https://api.telegram.org/bot{}/sendMessage'
-TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
-TELEGRAM_CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
+from CEACStatusBot import (
+    EmailNotificationHandle,
+    NotificationManager,
+    TelegramNotificationHandle,
+    GitHubIssueNotificationHandle,
+    infer_repository_from_git,
+)
 
-# Function to send email notifications
+FAILURE_RECORD_FILE = "failure_record.json"
+DEFAULT_FAILURE_NOTIFY_AFTER_HOURS = 24
 
-def send_email_notification(subject, message):
-    requests.post(EMAIL_API_URL, json={'subject': subject, 'message': message})
+# --- Load .env if present, else fallback to system env ---
+if os.path.exists(".env"):
+    load_dotenv(dotenv_path=".env")  # loads into os.environ
+else:
+    print(".env not found, using system environment only")
 
-# Function to send Telegram notifications
 
-def send_telegram_notification(message):
-    requests.post(TELEGRAM_API_URL.format(TELEGRAM_BOT_TOKEN), json={'chat_id': TELEGRAM_CHAT_ID, 'text': message})
+def download_artifact(repository: str):
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repository}/actions/artifacts"],
+            capture_output=True,
+            text=True,
+        )
+        artifacts = json.loads(result.stdout)
+        artifact_exists = any(artifact["name"] == "status-artifact" for artifact in artifacts["artifacts"])
 
-# Function to create a GitHub issue notification
+        if artifact_exists:
+            subprocess.run(["gh", "run", "download", "--name", "status-artifact"], check=True)
+        else:
+            with open("status_record.json", "w") as file:
+                json.dump({"statuses": []}, file)
+    except Exception as e:
+        print(f"Error downloading artifact: {e}")
 
-def create_github_issue(title, body):
-    url = f'https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/issues'
-    headers = {'Authorization': f'token {GITHUB_TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
-    issue = {'title': title, 'body': body}
-    requests.post(url, headers=headers, json=issue)
 
-# Function to check visa status
+def load_failure_state() -> dict:
+    if not os.path.exists(FAILURE_RECORD_FILE):
+        return {}
+    with open(FAILURE_RECORD_FILE, "r", encoding="utf-8") as file:
+        return json.load(file)
 
-def check_visa_status(current_status):
-    # Assume previous_status is fetched from a stored state (e.g., database)
-    previous_status = get_previous_status() # Assumed function to fetch previous status
 
-    if current_status != previous_status:
-        # Notify about the status change
-        email_subject = 'Visa Status Update'
-        email_message = f'Your visa status has changed to: {current_status}'
-        send_email_notification(email_subject, email_message)
-        send_telegram_notification(email_message)
+def save_failure_state(state: dict) -> None:
+    with open(FAILURE_RECORD_FILE, "w", encoding="utf-8") as file:
+        json.dump(state, file)
 
-        # Create GitHub issue on status change
-        issue_title = f'Visa Status Changed to: {current_status}'
-        issue_body = f'The visa status for the application has changed from {previous_status} to {current_status}.'
-        create_github_issue(issue_title, issue_body)
-        save_status(current_status) # Assumed function to save current status
 
-# Main execution block
-if __name__ == '__main__':
-    # Example usage, current_status would come from actual status check
-    current_status = fetch_current_status() # Assumed function to check current status
-    check_visa_status(current_status)
+def clear_failure_state() -> None:
+    if os.path.exists(FAILURE_RECORD_FILE):
+        os.remove(FAILURE_RECORD_FILE)
+
+
+def handle_query_failure(error: Exception, handles: list, application_number: str) -> None:
+    notify_after_hours = int(os.getenv("FAILURE_NOTIFY_AFTER_HOURS", DEFAULT_FAILURE_NOTIFY_AFTER_HOURS))
+    notify_after_seconds = notify_after_hours * 3600
+    now = datetime.now(UTC)
+
+    state = load_failure_state()
+    consecutive_failures = state.get("consecutive_failures", 0) + 1
+    first_failure_at_str = state.get("first_failure_at")
+    first_failure_at = datetime.fromisoformat(first_failure_at_str) if first_failure_at_str else now
+
+    should_notify = False
+    if (now - first_failure_at).total_seconds() >= notify_after_seconds:
+        last_notified_at_str = state.get("last_notified_at")
+        if last_notified_at_str:
+            last_notified_at = datetime.fromisoformat(last_notified_at_str)
+            should_notify = (now - last_notified_at).total_seconds() >= notify_after_seconds
+        else:
+            should_notify = True
+
+    next_state = {
+        "first_failure_at": first_failure_at.isoformat(),
+        "last_failure_at": now.isoformat(),
+        "consecutive_failures": consecutive_failures,
+        "last_notified_at": state.get("last_notified_at"),
+    }
+
+    if should_notify:
+        failure_result = {
+            "success": False,
+            "status": "Query Failed",
+            "application_num_origin": application_number,
+            "error": str(error),
+            "consecutive_failures": consecutive_failures,
+            "first_failure_at": first_failure_at.isoformat(),
+            "last_failure_at": now.isoformat(),
+        }
+        for handle in handles:
+            handle.send(failure_result)
+        next_state["last_notified_at"] = now.isoformat()
+    else:
+        print(f"Query failed but notification suppressed. Consecutive failures: {consecutive_failures}.")
+
+    save_failure_state(next_state)
+
+
+# --- Read env vars with fallback ---
+GH_TOKEN = os.getenv("GH_TOKEN")
+if not GH_TOKEN:
+    raise RuntimeError("GH_TOKEN is required for GitHub notifications")
+
+GITHUB_REPOSITORY = infer_repository_from_git()
+if not GITHUB_REPOSITORY:
+    raise RuntimeError("Cannot infer GitHub repository from git remote.origin.url")
+
+if not os.path.exists("status_record.json"):
+    download_artifact(GITHUB_REPOSITORY)
+
+try:
+    LOCATION = os.environ["LOCATION"]
+    NUMBER = os.environ["NUMBER"]
+    PASSPORT_NUMBER = os.environ["PASSPORT_NUMBER"]
+    SURNAME = os.environ["SURNAME"]
+    notificationManager = NotificationManager(LOCATION, NUMBER, PASSPORT_NUMBER, SURNAME)
+except KeyError as e:
+    raise RuntimeError(f"Missing required env var: {e}") from e
+
+notification_handles = []
+
+# --- Optional: Email notifications ---
+FROM = os.getenv("FROM")
+TO = os.getenv("TO")
+PASSWORD = os.getenv("PASSWORD")
+SMTP = os.getenv("SMTP", "")
+
+if FROM and TO and PASSWORD:
+    emailNotificationHandle = EmailNotificationHandle(FROM, TO, PASSWORD, SMTP)
+    notificationManager.addHandle(emailNotificationHandle)
+    notification_handles.append(emailNotificationHandle)
+else:
+    print("Email notification config missing or incomplete")
+
+
+# --- Optional: Telegram notifications ---
+BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
+CHAT_ID = os.getenv("TG_CHAT_ID")
+
+if BOT_TOKEN and CHAT_ID:
+    tgNotif = TelegramNotificationHandle(BOT_TOKEN, CHAT_ID)
+    notificationManager.addHandle(tgNotif)
+    notification_handles.append(tgNotif)
+else:
+    print("Telegram bot notification config missing or incomplete")
+
+
+
+
+# --- Required: GitHub issue notifications ---
+githubIssueHandle = GitHubIssueNotificationHandle(GH_TOKEN, GITHUB_REPOSITORY)
+notificationManager.addHandle(githubIssueHandle)
+notification_handles.append(githubIssueHandle)
+
+# --- Send notifications ---
+try:
+    notificationManager.send()
+    clear_failure_state()
+except RuntimeError as error:
+    handle_query_failure(error, notification_handles, NUMBER)

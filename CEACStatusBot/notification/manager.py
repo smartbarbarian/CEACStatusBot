@@ -61,8 +61,8 @@ class NotificationManager:
 
         # Check if the current status is different from the last recorded status
         if not statuses or current_status != statuses[-1].get("status", None) or current_last_updated != statuses[-1].get("last_updated", None):
-            self.__save_current_status(current_status, current_last_updated)
             self.__send_notifications(res)
+            self.__save_current_status(current_status, current_last_updated)
         else:
             print("Status unchanged. No notification sent.")
 
@@ -85,16 +85,17 @@ class NotificationManager:
 
     def __send_notifications(self, res: dict) -> None:
         if res["status"] == "Refused":
+            localTimeZone = datetime.timezone.utc
             try:
                 TIMEZONE = os.environ["TIMEZONE"]
                 localTimeZone = pytz.timezone(TIMEZONE)
                 localTime = datetime.datetime.now(localTimeZone)
             except pytz.exceptions.UnknownTimeZoneError:
-                print("UNKNOWN TIMEZONE Error, use default")
-                localTime = datetime.datetime.now()
+                print("UNKNOWN TIMEZONE Error, use UTC")
+                localTime = datetime.datetime.now(localTimeZone)
             except KeyError:
-                print("TIMEZONE Error")
-                localTime = datetime.datetime.now()
+                print("TIMEZONE Error, use UTC")
+                localTime = datetime.datetime.now(localTimeZone)
 
             active_hour_start, active_hour_end = self._get_hour_range()
             start_dt = datetime.datetime.combine(localTime.date(), active_hour_start, tzinfo=localTimeZone)
