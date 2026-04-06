@@ -7,11 +7,13 @@ from dotenv import load_dotenv
 
 from CEACStatusBot import (
     EmailNotificationHandle,
+    GitHubIssueNotificationHandle,
     NotificationManager,
     TelegramNotificationHandle,
 )
 
 FAILURE_RECORD_FILE = "failure_record.json"
+STATUS_RECORD_FILE = "status_record.json"
 DEFAULT_FAILURE_NOTIFY_AFTER_HOURS = 24
 
 # --- Load .env if present, else fallback to system env ---
@@ -23,8 +25,11 @@ else:
 
 def download_artifact():
     try:
+        if not REPO:
+            print("GITHUB_REPOSITORY not found, skip artifact download")
+            return
         result = subprocess.run(
-            ["gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/artifacts"],
+            ["gh", "api", f"repos/{REPO}/actions/artifacts"],
             capture_output=True,
             text=True,
         )
@@ -34,10 +39,19 @@ def download_artifact():
         if artifact_exists:
             subprocess.run(["gh", "run", "download", "--name", "status-artifact"], check=True)
         else:
-            with open("status_record.json", "w") as file:
+            with open(STATUS_RECORD_FILE, "w", encoding="utf-8") as file:
                 json.dump({"statuses": []}, file)
+            with open(FAILURE_RECORD_FILE, "w", encoding="utf-8") as file:
+                json.dump({}, file)
     except Exception as e:
         print(f"Error downloading artifact: {e}")
+    finally:
+        if not os.path.exists(STATUS_RECORD_FILE):
+            with open(STATUS_RECORD_FILE, "w", encoding="utf-8") as file:
+                json.dump({"statuses": []}, file)
+        if not os.path.exists(FAILURE_RECORD_FILE):
+            with open(FAILURE_RECORD_FILE, "w", encoding="utf-8") as file:
+                json.dump({}, file)
 
 
 def load_failure_state() -> dict:
@@ -53,8 +67,8 @@ def save_failure_state(state: dict) -> None:
 
 
 def clear_failure_state() -> None:
-    if os.path.exists(FAILURE_RECORD_FILE):
-        os.remove(FAILURE_RECORD_FILE)
+    with open(FAILURE_RECORD_FILE, "w", encoding="utf-8") as file:
+        json.dump({}, file)
 
 
 def handle_query_failure(error: Exception, handles: list, application_number: str) -> None:
@@ -106,8 +120,13 @@ def handle_query_failure(error: Exception, handles: list, application_number: st
 GH_TOKEN = os.getenv("GH_TOKEN")
 if not GH_TOKEN:
     print("GH_TOKEN not found")
+REPO = os.getenv("GITHUB_REPOSITORY")
+if not REPO:
+    REPO = os.getenv("REPO")
+if not REPO:
+    print("GITHUB_REPOSITORY/REPO not found")
 
-if not os.path.exists("status_record.json"):
+if not os.path.exists(STATUS_RECORD_FILE) or not os.path.exists(FAILURE_RECORD_FILE):
     download_artifact()
 
 try:
@@ -145,6 +164,14 @@ if BOT_TOKEN and CHAT_ID:
     notification_handles.append(tgNotif)
 else:
     print("Telegram bot notification config missing or incomplete")
+
+# --- Optional: GitHub issue notifications ---
+if GH_TOKEN and REPO:
+    ghNotif = GitHubIssueNotificationHandle(GH_TOKEN, REPO)
+    notificationManager.addHandle(ghNotif)
+    notification_handles.append(ghNotif)
+else:
+    print("GitHub issue notification config missing or incomplete")
 
 
 # --- Send notifications ---

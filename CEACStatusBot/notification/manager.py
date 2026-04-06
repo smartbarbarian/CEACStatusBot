@@ -61,8 +61,8 @@ class NotificationManager:
 
         # Check if the current status is different from the last recorded status
         if not statuses or current_status != statuses[-1].get("status", None) or current_last_updated != statuses[-1].get("last_updated", None):
-            self.__save_current_status(current_status, current_last_updated)
             self.__send_notifications(res)
+            self.__save_current_status(current_status, current_last_updated)
         else:
             print("Status unchanged. No notification sent.")
 
@@ -87,8 +87,7 @@ class NotificationManager:
         if res["status"] == "Refused":
             try:
                 TIMEZONE = os.environ["TIMEZONE"]
-                localTimeZone = pytz.timezone(TIMEZONE)
-                localTime = datetime.datetime.now(localTimeZone)
+                localTime = datetime.datetime.now(pytz.timezone(TIMEZONE))
             except pytz.exceptions.UnknownTimeZoneError:
                 print("UNKNOWN TIMEZONE Error, use default")
                 localTime = datetime.datetime.now()
@@ -97,9 +96,8 @@ class NotificationManager:
                 localTime = datetime.datetime.now()
 
             active_hour_start, active_hour_end = self._get_hour_range()
-            start_dt = datetime.datetime.combine(localTime.date(), active_hour_start, tzinfo=localTimeZone)
-            end_dt = datetime.datetime.combine(localTime.date(), active_hour_end, tzinfo=localTimeZone)
-            if not (start_dt <= localTime <= end_dt):
+            current_time = localTime.time()
+            if not (active_hour_start <= current_time <= active_hour_end):
                 print(
                     f"Outside active hours {os.getenv('ACTIVE_HOURS', DEFAULT_ACTIVE_HOURS)}. "
                     "No notification sent for Refused status."
