@@ -50,11 +50,14 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
+          REPO: ${{ github.repository }}
         run: uv run trigger.py
 
       - name: Upload status artifact
         uses: actions/upload-artifact@v4
         with:
           name: status-artifact
-          path: status_record.json
+          path: |
+            status_record.json
+            failure_record.json
+          if-no-files-found: warn
