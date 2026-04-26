@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: '17 * * * *' # At 00:00 on Monday
 
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -49,7 +54,8 @@ jobs:
           SMTP: ${{ secrets.SMTP }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_ISSUE_ASSIGNEES: ${{ github.repository_owner }}
           REPO: ${{ github.repository }}
         run: uv run trigger.py
 
