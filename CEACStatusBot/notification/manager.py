@@ -61,8 +61,11 @@ class NotificationManager:
 
         # Check if the current status is different from the last recorded status
         if not statuses or current_status != statuses[-1].get("status", None) or current_last_updated != statuses[-1].get("last_updated", None):
-            self.__send_notifications(res)
-            self.__save_current_status(current_status, current_last_updated)
+            notification_sent = self.__send_notifications(res)
+            if notification_sent:
+                self.__save_current_status(current_status, current_last_updated)
+            else:
+                print("Notification suppressed. Status not saved, so a later run can notify.")
         else:
             print("Status unchanged. No notification sent.")
 
@@ -83,7 +86,10 @@ class NotificationManager:
         with open(self.__status_file, "w") as file:
             json.dump({"statuses": statuses}, file)
 
-    def __send_notifications(self, res: dict) -> None:
+    def __send_notifications(self, res: dict) -> bool:
+        if not self.__handleList:
+            raise RuntimeError("No notification handles configured; refusing to save status without notification.")
+
         if res["status"] == "Refused":
             try:
                 TIMEZONE = os.environ["TIMEZONE"]
@@ -102,7 +108,8 @@ class NotificationManager:
                     f"Outside active hours {os.getenv('ACTIVE_HOURS', DEFAULT_ACTIVE_HOURS)}. "
                     "No notification sent for Refused status."
                 )
-                return
+                return False
 
         for notificationHandle in self.__handleList:
             notificationHandle.send(res)
+        return True

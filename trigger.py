@@ -167,7 +167,12 @@ else:
 
 # --- Optional: GitHub issue notifications ---
 if GH_TOKEN and REPO:
-    ghNotif = GitHubIssueNotificationHandle(GH_TOKEN, REPO)
+    gh_issue_assignees = [
+        assignee.strip()
+        for assignee in os.getenv("GH_ISSUE_ASSIGNEES", "").split(",")
+        if assignee.strip()
+    ]
+    ghNotif = GitHubIssueNotificationHandle(GH_TOKEN, REPO, gh_issue_assignees)
     notificationManager.addHandle(ghNotif)
     notification_handles.append(ghNotif)
 else:
